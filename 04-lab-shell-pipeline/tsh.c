@@ -100,7 +100,8 @@ int main(int argc, char **argv)
  * immediately. Otherwise, build a pipeline of commands and wait for all of
  * them to complete before returning.
 */
-void eval(char *cmdline)
+
+void eval(char *cmdline) 
 {
     char *argv[MAXARGS];
     int bg;
@@ -115,70 +116,23 @@ void eval(char *cmdline)
 
     if (builtin_cmd(argv) == 0) {
         int num_cmds = parseargs(argv, cmds, stdin_redir, stdout_redir);
+        int pipefds[2 * (num_cmds - 1)];
 
-        if (num_cmds == 2) { // Handling two-command pipeline
-            int pipefd[2];
-            if (pipe(pipefd) < 0) {
+        // Create pipes for each pair of commands
+        for (int i = 0; i < num_cmds - 1; i++) {
+            if (pipe(pipefds + i * 2) < 0) {
                 perror("pipe");
                 exit(1);
             }
+        }
 
-            pid_t pid1 = fork();
-            if (pid1 == 0) {
-                // First child process
-                if (stdin_redir[0] != -1) {
-                    int fd = open(argv[stdin_redir[0]], O_RDONLY);
-                    if (fd < 0) {
-                        perror("open");
-                        exit(1);
-                    }
-                    dup2(fd, STDIN_FILENO);
-                    close(fd);
-                }
-                dup2(pipefd[1], STDOUT_FILENO); // Redirect stdout to pipe
-                close(pipefd[0]); // Close read end of the pipe in this child
-                close(pipefd[1]); // Close write end after duplication
-                setpgid(0, 0); // Put the child in its own process group
-                execve(argv[cmds[0]], &argv[cmds[0]], NULL);
-                perror("execve");
-                exit(1);
-            }
+        pid_t first_pid = -1;
 
-            pid_t pid2 = fork();
-            if (pid2 == 0) {
-                // Second child process
-                if (stdout_redir[1] != -1) {
-                    int fd = open(argv[stdout_redir[1]], O_WRONLY | O_CREAT | O_TRUNC, 0600);
-                    if (fd < 0) {
-                        perror("open");
-                        exit(1);
-                    }
-                    dup2(fd, STDOUT_FILENO);
-                    close(fd);
-                }
-                dup2(pipefd[0], STDIN_FILENO); // Redirect stdin to pipe
-                close(pipefd[1]); // Close write end of the pipe in this child
-                close(pipefd[0]); // Close read end after duplication
-                setpgid(pid2, pid1); // Set process group to first child's group
-                execve(argv[cmds[1]], &argv[cmds[1]], NULL);
-                perror("execve");
-                exit(1);
-            }
-
-            // Parent process
-            close(pipefd[0]); // Close read end of pipe
-            close(pipefd[1]); // Close write end of pipe
-            setpgid(pid1, pid1); // Set process group for first child
-
-            // Wait for both children to finish
-            waitpid(pid1, NULL, 0);
-            waitpid(pid2, NULL, 0);
-        } else {
-            // Handle single command (as in the original implementation)
+        for (int i = 0; i < num_cmds; i++) {
             pid_t pid = fork();
-            if (pid == 0) {
-                // Child process
-                if (stdin_redir[0] != -1) {
+            if (pid == 0) { // Child process
+                // Input redirection for the first command
+                if (i == 0 && stdin_redir[0] != -1) {
                     int fd = open(argv[stdin_redir[0]], O_RDONLY);
                     if (fd < 0) {
                         perror("open");
@@ -188,7 +142,8 @@ void eval(char *cmdline)
                     close(fd);
                 }
 
-                if (stdout_redir[0] != -1) {
+                // Output redirection for the last command
+                if (i == num_cmds - 1 && stdout_redir[0] != -1) {
                     int fd = open(argv[stdout_redir[0]], O_WRONLY | O_CREAT | O_TRUNC, 0600);
                     if (fd < 0) {
                         perror("open");
@@ -198,19 +153,54 @@ void eval(char *cmdline)
                     close(fd);
                 }
 
-                setpgid(0, 0); // Put the child in its own process group
-                execve(argv[0], argv, NULL);
+                // Redirect input from previous pipe if not the first command
+                if (i > 0) {
+                    dup2(pipefds[(i - 1) * 2], STDIN_FILENO); // Read from previous pipe
+                }
+
+                // Redirect output to next pipe if not the last command
+                if (i < num_cmds - 1) {
+                    dup2(pipefds[i * 2 + 1], STDOUT_FILENO); // Write to current pipe
+                }
+
+                // Close all pipe file descriptors
+                for (int j = 0; j < 2 * (num_cmds - 1); j++) {
+                    close(pipefds[j]);
+                }
+
+                // Set process group ID for the first command
+                if (i == 0) {
+                    setpgid(0, 0);
+                } else {
+                    setpgid(0, first_pid);
+                }
+
+                // Execute the command
+                execve(argv[cmds[i]], argv + cmds[i], NULL);
                 perror("execve");
                 exit(1);
-            } else if (pid > 0) {
-                // Parent process
-                waitpid(pid, NULL, 0);
+            } else if (pid > 0) { // Parent process
+                if (i == 0) {
+                    first_pid = pid; // Store the PID of the first child
+                }
             } else {
                 perror("fork");
             }
         }
+
+        // Close all pipe file descriptors in the parent
+        for (int i = 0; i < 2 * (num_cmds - 1); i++) {
+            close(pipefds[i]);
+        }
+
+        // Wait for all child processes
+        for (int i = 0; i < num_cmds; i++) {
+            waitpid(-1, NULL, 0);
+        }
     }
 }
+
+
 /* 
  * parseargs - Parse the arguments to identify pipelined commands
  * 
