@@ -1,7 +1,7 @@
 /* 
  * tsh - A tiny shell program with job control
  * 
- * <Put your name and login ID here>
+ * <Wes Bovee wbovee>
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <fcntl.h>
 
 /* Misc manifest constants */
 #define MAXLINE    1024   /* max line size */
@@ -101,7 +102,53 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
-	return;
+	char *argv[MAXARGS];
+    	int bg;
+    	int cmds[MAXARGS];
+    	int stdin_redir[MAXARGS];
+    	int stdout_redir[MAXARGS];
+
+    	bg = parseline(cmdline, argv);
+    	if (argv[0] == NULL) {
+        	return;
+    	}
+	if (builtin_cmd(argv) == 0) {
+		int num_cmds = parseargs(argv, cmds, stdin_redir, stdout_redir);
+
+		pid_t pid = fork();
+       		if (pid == 0) {
+            		// Child process
+            		if (stdin_redir[0] != -1) {
+                		int fd = open(argv[stdin_redir[0]], O_RDONLY);
+                		if (fd < 0) {
+                    			perror("open");
+                    			exit(1);
+                		}
+                		dup2(fd, STDIN_FILENO);
+                		close(fd);
+            		}
+
+            		if (stdout_redir[0] != -1) {
+                		int fd = open(argv[stdout_redir[0]], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+                		if (fd < 0) {
+                    			perror("open");
+                    			exit(1);
+                		}
+                		dup2(fd, STDOUT_FILENO);
+                		close(fd);
+            		}
+
+            		setpgid(0, 0); // Put the child process in its own process group
+            		execve(argv[0], argv, NULL);
+            		perror("execve"); // Exec should not return
+            		exit(1);
+        	} else if (pid > 0) {
+            		// Parent process
+            		waitpid(pid, NULL, 0);
+        	} else {
+            		perror("fork");
+        	}
+    	}
 }
 
 /* 
@@ -226,8 +273,11 @@ int parseline(const char *cmdline, char **argv)
  * builtin_cmd - If the user has typed a built-in command then execute
  *    it immediately.  
  */
-int builtin_cmd(char **argv) 
+int builtin_cmd(char **argv)
 {
+	if (argv[0] != NULL && strcmp(argv[0], "quit") == 0) {
+        exit(0);
+        }
 	return 0;     /* not a builtin command */
 }
 
@@ -264,4 +314,3 @@ void app_error(char *msg)
 	fprintf(stdout, "%s\n", msg);
 	exit(1);
 }
-
