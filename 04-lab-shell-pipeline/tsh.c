@@ -110,44 +110,104 @@ void eval(char *cmdline)
 
     bg = parseline(cmdline, argv);
     if (argv[0] == NULL) {
-        return;
+        return; // No command entered
     }
 
     if (builtin_cmd(argv) == 0) {
         int num_cmds = parseargs(argv, cmds, stdin_redir, stdout_redir);
-        
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process
-            if (stdin_redir[0] != -1) {
-                int fd = open(argv[stdin_redir[0]], O_RDONLY);
-                if (fd < 0) {
-                    perror("open");
-                    exit(1);
-                }
-                dup2(fd, STDIN_FILENO);
-                close(fd);
+
+        if (num_cmds == 2) { // Handling two-command pipeline
+            int pipefd[2];
+            if (pipe(pipefd) < 0) {
+                perror("pipe");
+                exit(1);
             }
 
-            if (stdout_redir[0] != -1) {
-                int fd = open(argv[stdout_redir[0]], O_WRONLY | O_CREAT | O_TRUNC, 0600);
-                if (fd < 0) {
-                    perror("open");
-                    exit(1);
+            pid_t pid1 = fork();
+            if (pid1 == 0) {
+                // First child process
+                if (stdin_redir[0] != -1) {
+                    int fd = open(argv[stdin_redir[0]], O_RDONLY);
+                    if (fd < 0) {
+                        perror("open");
+                        exit(1);
+                    }
+                    dup2(fd, STDIN_FILENO);
+                    close(fd);
                 }
-                dup2(fd, STDOUT_FILENO);
-                close(fd);
+                dup2(pipefd[1], STDOUT_FILENO); // Redirect stdout to pipe
+                close(pipefd[0]); // Close read end of the pipe in this child
+                close(pipefd[1]); // Close write end after duplication
+                setpgid(0, 0); // Put the child in its own process group
+                execve(argv[cmds[0]], &argv[cmds[0]], NULL);
+                perror("execve");
+                exit(1);
             }
 
-            setpgid(0, 0); // Put the child process in its own process group
-            execve(argv[0], argv, NULL);
-            perror("execve"); // Exec should not return
-            exit(1);
-        } else if (pid > 0) {
+            pid_t pid2 = fork();
+            if (pid2 == 0) {
+                // Second child process
+                if (stdout_redir[1] != -1) {
+                    int fd = open(argv[stdout_redir[1]], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+                    if (fd < 0) {
+                        perror("open");
+                        exit(1);
+                    }
+                    dup2(fd, STDOUT_FILENO);
+                    close(fd);
+                }
+                dup2(pipefd[0], STDIN_FILENO); // Redirect stdin to pipe
+                close(pipefd[1]); // Close write end of the pipe in this child
+                close(pipefd[0]); // Close read end after duplication
+                setpgid(pid2, pid1); // Set process group to first child's group
+                execve(argv[cmds[1]], &argv[cmds[1]], NULL);
+                perror("execve");
+                exit(1);
+            }
+
             // Parent process
-            waitpid(pid, NULL, 0);
+            close(pipefd[0]); // Close read end of pipe
+            close(pipefd[1]); // Close write end of pipe
+            setpgid(pid1, pid1); // Set process group for first child
+
+            // Wait for both children to finish
+            waitpid(pid1, NULL, 0);
+            waitpid(pid2, NULL, 0);
         } else {
-            perror("fork");
+            // Handle single command (as in the original implementation)
+            pid_t pid = fork();
+            if (pid == 0) {
+                // Child process
+                if (stdin_redir[0] != -1) {
+                    int fd = open(argv[stdin_redir[0]], O_RDONLY);
+                    if (fd < 0) {
+                        perror("open");
+                        exit(1);
+                    }
+                    dup2(fd, STDIN_FILENO);
+                    close(fd);
+                }
+
+                if (stdout_redir[0] != -1) {
+                    int fd = open(argv[stdout_redir[0]], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+                    if (fd < 0) {
+                        perror("open");
+                        exit(1);
+                    }
+                    dup2(fd, STDOUT_FILENO);
+                    close(fd);
+                }
+
+                setpgid(0, 0); // Put the child in its own process group
+                execve(argv[0], argv, NULL);
+                perror("execve");
+                exit(1);
+            } else if (pid > 0) {
+                // Parent process
+                waitpid(pid, NULL, 0);
+            } else {
+                perror("fork");
+            }
         }
     }
 }
