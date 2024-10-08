@@ -84,10 +84,14 @@ int main(int argc, char *argv[]) {
         case '8':
             kill(pid, SIGHUP);
             sleep(1);
+	    kill(pid, 10);
+	    sleep(1);
+	    kill(pid, SIGINT);
+	    sleep(1);
 	    kill(pid, 30);
 	    sleep(1);
-	    kill(pid,SIGTERM);
-	    sleep(1);
+	    kill(pid, SIGTERM);
+            sleep(1);
 	    kill(pid, 12);
 	    sleep(1);
 	    kill(pid, SIGTERM);
