@@ -202,7 +202,8 @@ void eval(char *cmdline)
     sigprocmask(SIG_UNBLOCK, &mask, NULL); // Unblock signals
 
     if (!bg) { // If foreground job
-        waitpid(pid, NULL, 0); // Wait for the foreground job to finish
+//        waitpid(pid, NULL, 0); // Wait for the foreground job to finish
+	waitfg(pid);
     } else { // If background job
         printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline); // Print job info
     }
@@ -298,7 +299,9 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-	return;
+    while (fgpid(jobs) == pid) {
+        sleep(1); // Sleep for 1 second while the job is in the foreground
+    }
 }
 
 /*****************
@@ -314,7 +317,36 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-	return;
+    int olderrno = errno;
+    pid_t pid;
+    int status;
+
+    if (verbose) {
+        printf("sigchld_handler: entering\n");
+    }
+
+    while ((pid = waitpid(-1, &status, WUNTRACED | WNOHANG)) > 0) {
+        struct job_t *job = getjobpid(jobs, pid);
+        
+        if (job == NULL) {
+            continue; // Job not found
+        }
+
+        if (WIFSTOPPED(status)) {
+            // Job stopped
+            job->state = ST; // Update state to stopped
+            printf("Job [%d] (%d) stopped by signal %d\n", job->jid, pid, WSTOPSIG(status));
+        } else if (WIFSIGNALED(status)) {
+            // Job terminated by signal
+            printf("Job [%d] (%d) terminated by signal %d\n", job->jid, pid, WTERMSIG(status));
+            deletejob(jobs, pid); // Remove job from job list
+        } else if (WIFEXITED(status)) {
+            // Job terminated normally
+            deletejob(jobs, pid); // Remove job from job list
+        }
+    }
+
+    errno = olderrno;
 }
 
 /* 
