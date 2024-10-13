@@ -118,7 +118,7 @@ int main(int argc, char **argv)
 	/* Install the signal handlers */
 
 	/* These are the ones you will need to implement */
-//	Signal(SIGINT,  sigint_handler);   /* ctrl-c */
+	Signal(SIGINT,  sigint_handler);   /* ctrl-c */
 	Signal(SIGTSTP, sigtstp_handler);  /* ctrl-z */
 	Signal(SIGCHLD, sigchld_handler);  /* Terminated or stopped child */
 
@@ -354,9 +354,14 @@ void sigchld_handler(int sig)
  *    user types ctrl-c at the keyboard.  Catch it and send it along
  *    to the foreground job.  
  */
-void sigint_handler(int sig) 
-{
-	return;
+void sigint_handler(int sig) {
+    if (verbose)
+        printf("sigint_handler: entering\n");
+
+    pid_t pid = fgpid(jobs); // Get the PID of the foreground job
+    if (pid != 0) {
+        kill(-pid, SIGINT); // Send SIGINT to the foreground process group
+    }
 }
 
 /*
@@ -364,9 +369,14 @@ void sigint_handler(int sig)
  *     the user types ctrl-z at the keyboard. Catch it and suspend the
  *     foreground job by sending it a SIGTSTP.  
  */
-void sigtstp_handler(int sig) 
-{
-	return;
+void sigtstp_handler(int sig) {
+    if (verbose)
+        printf("sigtstp_handler: entering\n");
+
+    pid_t pid = fgpid(jobs); // Get the PID of the foreground job
+    if (pid != 0) {
+        kill(-pid, SIGTSTP); // Send SIGTSTP to the foreground process group
+    }
 }
 
 /*********************
