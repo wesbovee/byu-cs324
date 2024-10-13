@@ -118,7 +118,7 @@ int main(int argc, char **argv)
 	/* Install the signal handlers */
 
 	/* These are the ones you will need to implement */
-	Signal(SIGINT,  sigint_handler);   /* ctrl-c */
+//	Signal(SIGINT,  sigint_handler);   /* ctrl-c */
 	Signal(SIGTSTP, sigtstp_handler);  /* ctrl-z */
 	Signal(SIGCHLD, sigchld_handler);  /* Terminated or stopped child */
 
@@ -165,7 +165,47 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
-	return;
+    char *argv[MAXARGS]; // Argument list
+    pid_t pid;
+    int bg; // Should the job run in bg or fg?
+    sigset_t mask;
+
+    // Parse the command line
+    bg = parseline(cmdline, argv);
+    if (argv[0] == NULL)  // Ignore empty lines
+        return;
+
+    // Check for built-in commands
+    if (builtin_cmd(argv)) 
+        return;
+
+    // Block SIGCHLD, SIGINT, and SIGTSTP signals
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTSTP);
+    sigprocmask(SIG_BLOCK, &mask, NULL); // Block signals
+
+    // Fork a child process
+    if ((pid = fork()) == 0) { // Child process
+        sigprocmask(SIG_UNBLOCK, &mask, NULL); // Unblock signals
+        setpgid(0, 0); // Set new process group
+        if (execve(argv[0], argv, environ) < 0) { // Execute command
+            printf("%s: Command not found\n", argv[0]);
+            exit(0);
+        }
+    }
+
+    // Parent process
+    setpgid(pid, pid); // Put the child in its own process group
+    addjob(jobs, pid, bg ? BG : FG, cmdline); // Add the job to the job list
+    sigprocmask(SIG_UNBLOCK, &mask, NULL); // Unblock signals
+
+    if (!bg) { // If foreground job
+        waitpid(pid, NULL, 0); // Wait for the foreground job to finish
+    } else { // If background job
+        printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline); // Print job info
+    }
 }
 
 /* 
@@ -231,7 +271,18 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-	return 0;     /* not a builtin command */
+    if (strcmp(argv[0], "quit") == 0) {
+        exit(0); // Exit shell
+    }
+    if (strcmp(argv[0], "jobs") == 0) {
+        listjobs(jobs); // List all jobs
+        return 1;
+    }
+    if (strcmp(argv[0], "fg") == 0 || strcmp(argv[0], "bg") == 0) {
+        do_bgfg(argv); // Handle bg/fg commands
+        return 1;
+    }
+    return 0; // Not a built-in command
 }
 
 /* 
