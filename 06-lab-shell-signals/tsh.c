@@ -289,9 +289,46 @@ int builtin_cmd(char **argv)
 /* 
  * do_bgfg - Execute the builtin bg and fg commands
  */
-void do_bgfg(char **argv) 
-{
-	return;
+void do_bgfg(char **argv) {
+    struct job_t *job;
+
+    // Check if a command-line argument was passed
+    if (argv[1] == NULL) {
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+
+    // Check if the argument is a valid PID or JID
+    if (argv[1][0] == '%') { // Job ID
+        int jid = atoi(argv[1] + 1); // Convert to integer
+        job = getjobjid(jobs, jid); // Get job by JID
+        if (job == NULL) {
+            printf("%%%d: No such job\n", jid);
+            return;
+        }
+    } else if (isdigit(argv[1][0])) { // Process ID
+        pid_t pid = atoi(argv[1]); // Convert to integer
+        job = getjobpid(jobs, pid); // Get job by PID
+        if (job == NULL) {
+            printf("(%d): No such process\n", pid);
+            return;
+        }
+    } else {
+        // If the argument is not a PID or job ID
+        printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+        return;
+    }
+
+    // Update job state and send SIGCONT
+    if (strcmp(argv[0], "fg") == 0) {
+        job->state = FG; // Set state to foreground
+        kill(-job->pid, SIGCONT); // Send SIGCONT to the job
+        waitfg(job->pid); // Wait for it to finish
+    } else if (strcmp(argv[0], "bg") == 0) {
+        job->state = BG; // Set state to background
+        kill(-job->pid, SIGCONT); // Send SIGCONT to the job
+        printf("[%d] (%d) %s\n", job->jid, job->pid, job->cmdline); // Print job info
+    }
 }
 
 /* 
