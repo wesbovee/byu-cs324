@@ -1,142 +1,106 @@
-// Replace PUT_USERID_HERE with your actual BYU CS user id, which you can find
-// by running `id -u` on a CS lab machine.
-#define USERID 1823704807
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
 #include <unistd.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <netdb.h>
+#include <stdint.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
-int verbose = 0;
+#define USERID 123456789
 
-void print_bytes(unsigned char *bytes, int byteslen);
+void print_bytes(unsigned char *msg, int len) {
+    for (int i = 0; i < len; i++) {
+        printf("%02x ", msg[i]);
+    }
+    printf("\n");
+}
 
-int main(int argc, char *argv[]) {
+void parse_args(int argc, char *argv[], char *server, int *port, int *level, int *seed) {
     if (argc != 5) {
         fprintf(stderr, "Usage: %s server port level seed\n", argv[0]);
-        return 1;
+        exit(EXIT_FAILURE);
     }
+    strcpy(server, argv[1]);
+    *port = atoi(argv[2]);
+    *level = atoi(argv[3]);
+    *seed = atoi(argv[4]);
+    printf("Server: %s\nPort: %d\nLevel: %d\nSeed: %d\n", server, *port, *level, *seed);
+}
 
-    char *server = argv[1];
-    int port = atoi(argv[2]);
-    int level = atoi(argv[3]);
-    int seed = atoi(argv[4]);
+void create_initial_message(unsigned char *msg, int level, int user_id, int seed) {
+    msg[0] = 0;
+    msg[1] = (unsigned char)level;
+    msg[2] = (user_id >> 24) & 0xFF;
+    msg[3] = (user_id >> 16) & 0xFF;
+    msg[4] = (user_id >> 8) & 0xFF;
+    msg[5] = user_id & 0xFF;
+    msg[6] = (seed >> 8) & 0xFF;
+    msg[7] = seed & 0xFF;
+}
 
+int setup_socket(struct sockaddr_in *server_addr, const char *server, int port) {
     struct addrinfo hints, *res;
+    int sockfd;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_PASSIVE;
+
     char port_str[10];
     sprintf(port_str, "%d", port);
-    int status = getaddrinfo(server, port_str, &hints, &res);
-    if (status != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
-        return 1;
+
+    if (getaddrinfo(server, port_str, &hints, &res) != 0) {
+        perror("getaddrinfo failed");
+        exit(EXIT_FAILURE);
     }
 
-    int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (sock == -1) {
-        perror("socket");
-        return 1;
+    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sockfd == -1) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
     }
 
-    unsigned char request[8];
-    unsigned int user_id = 1823704807;
-    unsigned short seed_network = htons((unsigned short)seed);
-    request[0] = 0;
-    request[1] = (unsigned char)level;
-    memcpy(&request[2], &user_id, sizeof(user_id));
-    memcpy(&request[6], &seed_network, sizeof(seed_network));
+    memcpy(server_addr, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
 
-    int sent_bytes = sendto(sock, request, 8, 0, res->ai_addr, res->ai_addrlen);
-    if (sent_bytes == -1) {
-        perror("sendto");
-        return 1;
+    return sockfd;
+}
+
+int main(int argc, char *argv[]) {
+    char server[256];
+    int port, level, seed;
+    parse_args(argc, argv, server, &port, &level, &seed);
+
+    unsigned char msg[8];
+    create_initial_message(msg, level, USERID, seed);
+
+    printf("Initial request message:\n");
+    print_bytes(msg, 8);
+
+    struct sockaddr_in server_addr;
+    int sockfd = setup_socket(&server_addr, server, port);
+
+    if (sendto(sockfd, msg, 8, 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("sendto failed");
+        close(sockfd);
+        exit(EXIT_FAILURE);
     }
 
     unsigned char response[256];
-    socklen_t addr_len = res->ai_addrlen;
-    int received_bytes = recvfrom(sock, response, sizeof(response), 0, res->ai_addr, &addr_len);
-    if (received_bytes == -1) {
-        perror("recvfrom");
-        return 1;
+    socklen_t addr_len = sizeof(server_addr);
+    ssize_t num_bytes = recvfrom(sockfd, response, sizeof(response), 0, (struct sockaddr *)&server_addr, &addr_len);
+    if (num_bytes == -1) {
+        perror("recvfrom failed");
+        close(sockfd);
+        exit(EXIT_FAILURE);
     }
 
-    unsigned char chunk_len = response[0];
-    char chunk[chunk_len + 1];
-    memcpy(chunk, &response[1], chunk_len);
-    chunk[chunk_len] = '\0';
-    unsigned char op_code = response[chunk_len + 1];
-    unsigned short op_param;
-    memcpy(&op_param, &response[chunk_len + 2], sizeof(op_param));
-    op_param = ntohs(op_param);
-    unsigned int nonce;
-    memcpy(&nonce, &response[chunk_len + 4], sizeof(nonce));
-    nonce = ntohl(nonce);
+    printf("Response message:\n");
+    print_bytes(response, num_bytes);
 
-    printf("Chunk Length: %d\n", chunk_len);
-    printf("Chunk: %s\n", chunk);
-    printf("Op Code: %d\n", op_code);
-    printf("Op Param: %d\n", op_param);
-    printf("Nonce: %u\n", nonce);
+    close(sockfd);
 
-    unsigned int next_nonce = htonl(nonce + 1);
-    unsigned char follow_up[4];
-    memcpy(follow_up, &next_nonce, sizeof(next_nonce));
-
-    print_bytes(follow_up, sizeof(follow_up));
-
-    sent_bytes = sendto(sock, follow_up, sizeof(follow_up), 0, res->ai_addr, res->ai_addrlen);
-    if (sent_bytes == -1) {
-        perror("sendto");
-        return 1;
-    }
-
-    close(sock);
     return 0;
 }
-
-void print_bytes(unsigned char *bytes, int byteslen) {
-    int i, j, byteslen_adjusted;
-
-    if (byteslen % 8) {
-        byteslen_adjusted = ((byteslen / 8) + 1) * 8;
-    } else {
-        byteslen_adjusted = byteslen;
-    }
-    for (i = 0; i < byteslen_adjusted + 1; i++) {
-        if (!(i % 8)) {
-            if (i > 0) {
-                for (j = i - 8; j < i; j++) {
-                    if (j >= byteslen_adjusted) {
-                        printf("  ");
-                    } else if (j >= byteslen) {
-                        printf("  ");
-                    } else if (bytes[j] >= '!' && bytes[j] <= '~') {
-                        printf(" %c", bytes[j]);
-                    } else {
-                        printf(" .");
-                    }
-                }
-            }
-            if (i < byteslen_adjusted) {
-                printf("\n%02X: ", i);
-            }
-        } else if (!(i % 4)) {
-            printf(" ");
-        }
-        if (i >= byteslen_adjusted) {
-            continue;
-        } else if (i >= byteslen) {
-            printf("   ");
-        } else {
-            printf("%02X ", bytes[i]);
-        }
-    }
-    printf("\n");
-    fflush(stdout);
-}
-
