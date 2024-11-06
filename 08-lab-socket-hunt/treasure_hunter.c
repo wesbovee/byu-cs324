@@ -32,12 +32,12 @@ void parse_args(int argc, char *argv[], char *server, int *port, int *level, int
 void create_initial_message(unsigned char *msg, int level, int user_id, int seed) {
     msg[0] = 0;
     msg[1] = (unsigned char)level;
-    msg[2] = (user_id >> 24) & 0xFF;
-    msg[3] = (user_id >> 16) & 0xFF;
-    msg[4] = (user_id >> 8) & 0xFF;
-    msg[5] = user_id & 0xFF;
-    msg[6] = (seed >> 8) & 0xFF;
-    msg[7] = seed & 0xFF;
+
+    uint32_t user_id_network = htonl(user_id); // Convert user ID to network byte order (big-endian)
+    memcpy(&msg[2], &user_id_network, sizeof(user_id_network));
+
+    uint16_t seed_network = htons(seed); // Convert seed to network byte order (big-endian)
+    memcpy(&msg[6], &seed_network, sizeof(seed_network));
 }
 
 int setup_socket(struct sockaddr_in *server_addr, const char *server, int port) {
