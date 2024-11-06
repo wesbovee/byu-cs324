@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
     }
 
     unsigned char request[8];
-    unsigned int user_id = USERID;
+    unsigned int user_id = 1823704807;
     unsigned short seed_network = htons((unsigned short)seed);
     request[0] = 0;
     request[1] = (unsigned char)level;
