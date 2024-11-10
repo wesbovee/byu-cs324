@@ -1,6 +1,8 @@
 // Replace PUT_USERID_HERE with your actual BYU CS user id, which you can find
 // by running `id -u` on a CS lab machine.
 #define USERID 1823704807
+//#define USERID 123456789
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +23,21 @@ int main(int argc, char *argv[]) {
     printf("Port (integer): %d\n", port_int);
     printf("Level: %d\n", level);
     printf("Seed: %d\n", seed);
+
+	unsigned char request[8] = {0};
+
+	request[1]= (unsigned char)level;
+
+	request[2]= (USERID >> 24) & 0xFF;
+	request[3]= (USERID >> 16) & 0xFF;
+	request[4]= (USERID >> 8) & 0xFF;
+	request[5]= USERID & 0xFF;
+
+	request[6] = (seed >> 8) & 0xFF;
+	request[7] = seed & 0xFF;
+
+	print_bytes(request, 8);
+
 
 }
 
