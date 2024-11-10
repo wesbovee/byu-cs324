@@ -3,6 +3,7 @@
 #define USERID 1823704807
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "sockhelper.h"
 
@@ -11,6 +12,16 @@ int verbose = 0;
 void print_bytes(unsigned char *bytes, int byteslen);
 
 int main(int argc, char *argv[]) {
+	char *port_str = argv[2]; 
+	int port_int = atoi(argv[2]);
+	int level = atoi(argv[3]);
+	int seed = atoi(argv[4]);
+
+	printf("Port (string): %s\n", port_str);
+    printf("Port (integer): %d\n", port_int);
+    printf("Level: %d\n", level);
+    printf("Seed: %d\n", seed);
+
 }
 
 void print_bytes(unsigned char *bytes, int byteslen) {
